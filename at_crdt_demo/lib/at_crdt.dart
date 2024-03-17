@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:at_client/at_client.dart';
 import 'package:crdt/crdt.dart';
 import 'package:crdt/map_crdt.dart';
+import 'package:uuid/uuid.dart';
 import 'package:uuid/validation.dart';
 
 /// QUESTIONS QUESTIONS QUESTIONS
@@ -20,26 +21,37 @@ import 'package:uuid/validation.dart';
 class AtCrdt extends Crdt {
   final AtClient atClient;
   final Set<String> tables;
+  final String? sharedWith;
+  final String? sharedBy;
 
   // TODO: Uuid v1 assumed here! Check the assumption against privacy concerns.
   /// The [tables] names to use for the keys in the CRDT
   /// Example: 123e4567-e89b-12d3-a456-426655440000.table.crdt.app@atSign
   /// Warning! Beware the max namespace length in atProtocol is 55 - 36 = 19
-  AtCrdt({required this.atClient, required Iterable<String> tables})
-      : assert(tables.isNotEmpty, "Tables must not be empty"),
+  AtCrdt({
+    required this.atClient,
+    required Iterable<String> tables,
+    this.sharedBy,
+    this.sharedWith,
+  })  : assert(tables.isNotEmpty, "Tables must not be empty"),
         assert(tables.length == tables.toSet().length,
             "Table names must be unique"),
         assert(tables.toList().every((t) => t.length <= 19),
             "Table names must be at most 19 characters long"),
         tables = tables.toSet();
 
-  Future<void> initialize() async {
+  Future<void> init() async {
     late String nodeId;
-    for (var table in tables) {
-      final records = await getRecords(table);
-      if (records.isNotEmpty) {
-        nodeId = records.values.first.modified.nodeId;
-        break;
+
+    if (await isEmpty()) {
+      nodeId = generateNodeId();
+    } else {
+      for (var table in tables) {
+        final records = await getRecords(table);
+        if (records.isNotEmpty) {
+          nodeId = records.values.first.modified.nodeId;
+          break;
+        }
       }
     }
 
@@ -95,12 +107,11 @@ class AtCrdt extends Crdt {
     // Remove empty table changesets
     changeset.removeWhere((_, records) => records.isEmpty);
 
-    // TODO: Copied verbatim from [MapCrdtBase]. Looks fishy 🐠.
     return changeset.map((table, records) => MapEntry(
         table,
         records
             .map((key, record) => MapEntry(key, {
-                  'key': key.crdtRecordKey(),
+                  'key': _crdtKeyFrom(key),
                   ...record.toJson(),
                 }))
             .values
@@ -171,11 +182,13 @@ class AtCrdt extends Crdt {
   }
 
   FutureOr<Record?> getRecord(String table, String key) async {
-    final atKey = SelfKey()
-      ..key = "$key.$table"
-      ..namespace = atClient.getPreferences()!.namespace;
-    final atValue = await atClient.get(atKey);
-    return atValue.value as Record;
+    try {
+      final atKey = _atKeyFrom(table, UuidValue.fromString(key));
+      final atValue = await atClient.get(atKey);
+      return atValue.value as Record;
+    } catch (e) {
+      return null;
+    }
   }
 
   Future<Map<AtKey, Record>> getRecords(String table) async {
@@ -188,6 +201,8 @@ class AtCrdt extends Crdt {
     return {for (var e in allRecords) e.$1: e.$2.value as Record};
   }
 
+  // TODO: Consider using AtKey for the dataset (CRUD on records).
+  // TODO: To get an atKey, not only its key but also its type (self|shared) is needed.
   FutureOr<void> putRecords(Map<String, Map<String, Record>> dataset) async {
     for (final entry in dataset.entries) {
       final tableName = entry.key;
@@ -195,30 +210,89 @@ class AtCrdt extends Crdt {
       for (final recordEntry in entry.value.entries) {
         final crdtKey = recordEntry.key;
         final record = recordEntry.value;
-        final atKey = AtKey()
-          ..key = "$crdtKey.$tableName"
-          ..namespace = atClient.getPreferences()!.namespace;
-
+        final atKey = _atKeyFrom(tableName, UuidValue.fromString(crdtKey));
         await atClient.put(atKey, record);
       }
     }
   }
 
-  // @override
+  /// Get a value from the local dataset.
+  Future<dynamic> get(String table, String key) async {
+    if (!tables.contains(table)) throw 'Unknown table: $table';
+    final value = await getRecord(table, key);
+    return value == null || value.isDeleted ? null : value.value;
+  }
+
+  /// Get a table map from the local dataset.
+  Future<Map<String, dynamic>> getMap(String table) async {
+    if (!tables.contains(table)) throw 'Unknown table: $table';
+    return (await getRecords(table)
+          ..removeWhere((_, record) => record.isDeleted))
+        .map((key, record) => MapEntry(_crdtKeyFrom(key), record.value));
+  }
+
+  /// Insert a single value into this dataset.
+  ///
+  /// Use [putAll] if inserting multiple values to avoid incrementing the
+  /// canonical time unnecessarily.
+  Future<void> put(String table, String key, dynamic value,
+          [bool isDeleted = false]) =>
+      putAll({
+        table: {key: value}
+      }, isDeleted);
+
+  /// Insert multiple values into this dataset.
+  Future<void> putAll(Map<String, Map<String, dynamic>> dataset,
+      [bool isDeleted = false]) async {
+    // Ensure all incoming tables exist in local dataset
+    final badTables = dataset.keys.toSet().difference(tables);
+    if (badTables.isNotEmpty) {
+      throw 'Unknown table(s): ${badTables.join(', ')}';
+    }
+
+    // Ignore empty records
+    dataset.removeWhere((_, records) => records.isEmpty);
+
+    // Generate records with incremented canonical time
+    final hlc = canonicalTime.increment();
+    final records = dataset.map((table, values) => MapEntry(
+        table,
+        values.map((key, value) =>
+            MapEntry(key, Record(value, isDeleted, hlc, hlc)))));
+
+    // Store records
+    await putRecords(records);
+    onDatasetChanged(records.keys, hlc);
+  }
+
+  // TODO: Add observer pattern to the CRDT
   // Stream<WatchEvent> watch(String table, {String? key}) {
   //   // TODO: implement watch
   //   throw UnimplementedError();
   // }
 
   Future<List<AtKey>> _getAtKeys(String table) async {
-    final ns = atClient.getPreferences()!.namespace;
-    return atClient.getAtKeys(regex: "*.$table.crdt.$ns");
+    final ns = atClient.getPreferences()!.namespace ?? '';
+    final pattern =
+        r'.*' + RegExp.escape(table) + r'\.crdt\.' + RegExp.escape(ns) + r'.*';
+    return atClient.getAtKeys(
+      regex: pattern,
+      sharedBy: sharedBy,
+      sharedWith: sharedWith,
+    );
   }
-}
 
-extension _AtKeyCrdt on AtKey {
-  String crdtRecordKey() {
-    final recordKey = key.split('.').first;
+  AtKey _atKeyFrom(String table, UuidValue key) {
+    final ns = atClient.getPreferences()!.namespace;
+    return AtKey()
+      ..key = "${key.uuid}.$table.crdt"
+      ..namespace = ns
+      ..sharedBy = sharedBy
+      ..sharedWith = sharedWith;
+  }
+
+  String _crdtKeyFrom(AtKey atKey) {
+    final recordKey = atKey.key.split('.').first;
     if (!UuidValidation.isValidUUID(fromString: recordKey)) {
       throw 'Invalid record key: $recordKey';
     }
