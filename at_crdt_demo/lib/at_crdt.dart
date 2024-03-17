@@ -273,6 +273,14 @@ class AtCrdt extends Crdt {
   //   throw UnimplementedError();
   // }
 
+  Future<void> delete() async {
+    final keysToDelete =
+        await Future.wait(tables.map((table) => _getAtKeys(table)));
+    keysToDelete.expand((key) => key).forEach((key) async {
+      await atClient.delete(key);
+    });
+  }
+
   Future<List<AtKey>> _getAtKeys(String table) async {
     final ns = atClient.getPreferences()!.namespace ?? '';
     final pattern = r'.*' +

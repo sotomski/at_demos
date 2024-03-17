@@ -108,6 +108,14 @@ void main() {
       expect((await crdt.getMap('table')).length, 1);
       expect(await crdt.get('table', key), 1);
     });
+
+    test('Delete entire CRDT', () async {
+      final key = Uuid().v1();
+      await crdt.put('table', key, 1, true);
+      expect(await crdt.isEmpty(), false);
+      await crdt.delete();
+      expect(await crdt.isEmpty(), true);
+    });
   });
 
   group('Merge', () {
@@ -382,6 +390,13 @@ class FakeAtClient extends Fake implements AtClient {
       throw 'Key not found: $key in ${data.keys}';
     }
     return Future.value(value);
+  }
+
+  @override
+  Future<bool> delete(AtKey key,
+      {bool isDedicated = false, DeleteRequestOptions? deleteRequestOptions}) {
+    data.remove(key);
+    return Future.value(true);
   }
 
   @override
