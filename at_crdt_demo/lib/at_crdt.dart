@@ -20,6 +20,7 @@ import 'package:uuid/validation.dart';
 /// A state-based grow-only CRDT implementation.
 class AtCrdt extends Crdt {
   final AtClient atClient;
+  final String name;
   final Set<String> tables;
   final String? sharedWith;
   final String? sharedBy;
@@ -30,14 +31,15 @@ class AtCrdt extends Crdt {
   /// Warning! Beware the max namespace length in atProtocol is 55 - 36 = 19
   AtCrdt({
     required this.atClient,
+    this.name = 'crdt',
     required Iterable<String> tables,
     this.sharedBy,
     this.sharedWith,
   })  : assert(tables.isNotEmpty, "Tables must not be empty"),
         assert(tables.length == tables.toSet().length,
             "Table names must be unique"),
-        assert(tables.toList().every((t) => t.length <= 19),
-            "Table names must be at most 19 characters long"),
+        assert(tables.toList().every((t) => t.length <= 19 - name.length),
+            "Table names must be at most ${19 - name.length} characters long"),
         tables = tables.toSet();
 
   Future<void> init() async {
@@ -273,8 +275,13 @@ class AtCrdt extends Crdt {
 
   Future<List<AtKey>> _getAtKeys(String table) async {
     final ns = atClient.getPreferences()!.namespace ?? '';
-    final pattern =
-        r'.*' + RegExp.escape(table) + r'\.crdt\.' + RegExp.escape(ns) + r'.*';
+    final pattern = r'.*' +
+        RegExp.escape(table) +
+        r'\.' +
+        RegExp.escape(name) +
+        r'\.' +
+        RegExp.escape(ns) +
+        r'.*';
     return atClient.getAtKeys(
       regex: pattern,
       sharedBy: sharedBy,
@@ -285,7 +292,7 @@ class AtCrdt extends Crdt {
   AtKey _atKeyFrom(String table, UuidValue key) {
     final ns = atClient.getPreferences()!.namespace;
     return AtKey()
-      ..key = "${key.uuid}.$table.crdt"
+      ..key = "${key.uuid}.$table.$name"
       ..namespace = ns
       ..sharedBy = sharedBy
       ..sharedWith = sharedWith;

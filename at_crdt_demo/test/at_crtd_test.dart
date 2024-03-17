@@ -19,21 +19,15 @@ void main() {
 
   tearDown(() => atClient.data.clear());
 
-  Future<AtCrdt> createCrdt(Set<String> tables,
-      {String? sharedBy, String? sharedWith}) async {
-    final aCrdt = AtCrdt(
-      atClient: atClient,
-      tables: tables,
-      sharedBy: sharedBy,
-      sharedWith: sharedWith,
-    );
+  Future<AtCrdt> createCrdt(String name, Set<String> tables) async {
+    final aCrdt = AtCrdt(atClient: atClient, name: name, tables: tables);
     await aCrdt.init();
     return aCrdt;
   }
 
   group('Empty', () {
     setUp(() async {
-      crdt = await createCrdt({'table'});
+      crdt = await createCrdt('crdt', {'table'});
     });
 
     test('Node ID', () {
@@ -48,7 +42,7 @@ void main() {
 
   group('Insert', () {
     setUp(() async {
-      crdt = await createCrdt({'table'});
+      crdt = await createCrdt('crdt', {'table'});
     });
 
     test('Single', () async {
@@ -93,7 +87,7 @@ void main() {
 
   group('Delete', () {
     setUp(() async {
-      crdt = await createCrdt({'table'});
+      crdt = await createCrdt('crdt', {'table'});
     });
 
     test('Set deleted', () async {
@@ -120,8 +114,8 @@ void main() {
     late AtCrdt crdt1;
 
     setUp(() async {
-      crdt = await createCrdt({'table'});
-      crdt1 = await createCrdt({'table'}, sharedWith: '@bob');
+      crdt = await createCrdt('crdt', {'table'});
+      crdt1 = await createCrdt('crdt1', {'table'});
     });
 
     test('Into empty', () async {
@@ -190,7 +184,7 @@ void main() {
 
     test('Enforce table existence', () async {
       final key = Uuid().v1();
-      final other = await createCrdt({'not_table'}, sharedWith: '@john');
+      final other = await createCrdt('other', {'not_table'});
       await other.put('not_table', key, 1);
       expect(() async => await crdt.merge(await other.getChangeset()),
           throwsA('Unknown table(s): not_table'));
@@ -210,9 +204,9 @@ void main() {
     late AtCrdt crdt2;
 
     setUp(() async {
-      crdt = await createCrdt({'table'}, sharedWith: '@alice');
-      crdt1 = await createCrdt({'table'}, sharedWith: '@bob');
-      crdt2 = await createCrdt({'table'}, sharedWith: '@charlie');
+      crdt = await createCrdt('crdt', {'table'});
+      crdt1 = await createCrdt('crdt1', {'table'});
+      crdt2 = await createCrdt('crdt2', {'table'});
 
       await crdt.put('table', Uuid().v1(), 1);
       await _delay;
@@ -225,8 +219,7 @@ void main() {
     });
 
     test('Tables', () async {
-      final crdt3 =
-          await createCrdt({'table', 'another_table'}, sharedWith: '@dave');
+      final crdt3 = await createCrdt('crdt3', {'table', 'another_table'});
       await crdt3.put('another_table', Uuid().v1(), 1);
       final changeset = await crdt3.getChangeset(onlyTables: ['another_table']);
       expect(changeset.keys, ['another_table']);
@@ -265,9 +258,9 @@ void main() {
     late AtCrdt crdt2;
 
     setUp(() async {
-      crdt = await createCrdt({'table'}, sharedWith: '@alice');
-      crdt1 = await createCrdt({'table'}, sharedWith: '@bob');
-      crdt2 = await createCrdt({'table'}, sharedWith: '@charlie');
+      crdt = await createCrdt('crdt', {'table'});
+      crdt1 = await createCrdt('crdt1', {'table'});
+      crdt2 = await createCrdt('crdt2', {'table'});
 
       await crdt.put('table', Uuid().v1(), 1);
       await _delay;
@@ -307,7 +300,7 @@ void main() {
 
   group('Tables changed stream', () {
     setUp(() async {
-      crdt = await createCrdt({'table_1', 'table_2'}, sharedWith: '@alice');
+      crdt = await createCrdt('crdt', {'table_1', 'table_2'});
     });
 
     test('Single change', () async {
@@ -346,8 +339,7 @@ void main() {
     });
 
     test('Merge', () async {
-      final crdt1 =
-          await createCrdt({'table_1', 'table_2'}, sharedWith: '@bob');
+      final crdt1 = await createCrdt('crdt1', {'table_1', 'table_2'});
       await crdt1.put('table_1', Uuid().v1(), 1);
       expectLater(
           crdt.onTablesChanged.map((e) => e.tables), emits(['table_1']));
