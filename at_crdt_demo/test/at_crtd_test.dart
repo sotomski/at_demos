@@ -164,6 +164,19 @@ void main() {
           reason: 'There should be 2 atRecords after merge');
     });
 
+    test('Modified', () async {
+      final key = Uuid().v1();
+      await crdt.put('table', key, 1);
+      await _delay;
+      await crdt1.put('table', key, 2);
+      await _delay;
+      await crdt.put('table', key, 3);
+      await crdt1.merge(await crdt.getChangeset());
+      expect(await crdt1.get('table', key), 3);
+      expect(atClient.data.length, 2,
+          reason: 'There should be 2 atRecords after merge');
+    });
+
     test('Lower node id', () async {
       final key = Uuid().v1();
       await crdt.put('table', key, 1);

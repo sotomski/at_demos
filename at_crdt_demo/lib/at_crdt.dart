@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:at_client/at_client.dart';
 import 'package:crdt/crdt.dart';
@@ -187,7 +188,7 @@ class AtCrdt extends Crdt {
     try {
       final atKey = _atKeyFrom(table, UuidValue.fromString(key));
       final atValue = await atClient.get(atKey);
-      return atValue.value as Record;
+      return _recordFromJson(atValue.value);
     } catch (e) {
       return null;
     }
@@ -200,7 +201,7 @@ class AtCrdt extends Crdt {
               return (key, value);
             }));
     final allRecords = await Future.wait(recordFutures);
-    return {for (var e in allRecords) e.$1: e.$2.value as Record};
+    return {for (var e in allRecords) e.$1: _recordFromJson(e.$2.value)};
   }
 
   // TODO: Consider using AtKey for the dataset (CRUD on records).
@@ -212,8 +213,15 @@ class AtCrdt extends Crdt {
       for (final recordEntry in entry.value.entries) {
         final crdtKey = recordEntry.key;
         final record = recordEntry.value;
+        // TODO:  ??? Is this correct? Why isn't Record.toJson serialize modified?
+        final recordJson = jsonEncode({
+          'value': record.value,
+          'is_deleted': record.isDeleted,
+          'hlc': record.hlc.toString(),
+          'modified': record.modified.toString(),
+        });
         final atKey = _atKeyFrom(tableName, UuidValue.fromString(crdtKey));
-        await atClient.put(atKey, record);
+        await atClient.put(atKey, recordJson);
       }
     }
   }
@@ -294,6 +302,21 @@ class AtCrdt extends Crdt {
       regex: pattern,
       sharedBy: sharedBy,
       sharedWith: sharedWith,
+    );
+  }
+
+  Record _recordFromJson(String jsonString) {
+    final json = jsonDecode(jsonString, reviver: (key, value) {
+      if (key == 'hlc' || key == 'modified') {
+        return Hlc.parse(value as String);
+      }
+      return value;
+    });
+    return Record(
+      json['value'],
+      json['is_deleted'],
+      json['hlc'],
+      json['modified'] ?? json['hlc'],
     );
   }
 
