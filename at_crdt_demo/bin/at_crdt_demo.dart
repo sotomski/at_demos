@@ -6,8 +6,6 @@ import 'package:at_crdt_demo/at_crdt.dart';
 import 'package:chalkdart/chalkstrings.dart';
 
 Future<void> main(List<String> arguments) async {
-  // TODO: Add verbose mode logging operations on the atKeys.
-
   try {
     final atClient = (await CLIBase.fromCommandLineArgs(arguments)).atClient;
     final crdts = <String, AtCrdt>{};
@@ -31,7 +29,17 @@ Future<void> main(List<String> arguments) async {
       }
       if (line == null) continue;
 
+      // Parse input
       final [cmd, ...args] = line.split(' ');
+
+      // Ensure a CRDT is available
+      final crdtName = args[0];
+      if (cmd != 'create' && !crdts.containsKey(crdtName)) {
+        stdout.writeln(chalk.brightYellow(
+            'No $crdtName CRDT available. Is it a typo or did you forget to \'create $crdtName <tables>\'?'));
+      }
+
+      // Execute command
       try {
         switch (cmd) {
           case 'create':
