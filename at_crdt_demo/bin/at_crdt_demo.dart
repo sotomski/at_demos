@@ -30,17 +30,17 @@ Future<void> main(List<String> arguments) async {
 
       // Ensure a CRDT is available and initialized
       final crdtName = args.elementAtOrNull(0);
-      if (!['create', 'help', 'syncremote'].contains(cmd) &&
+      if (!['init', 'help', 'syncremote'].contains(cmd) &&
           crdtName != null &&
           !crdts.containsKey(crdtName)) {
         stdout.writeln(chalk.brightYellow(
-            'No $crdtName CRDT available. Is it a typo or did you forget to ${chalk.blueBright('create $crdtName <tables>')}?'));
+            'No $crdtName CRDT available. Is it a typo or did you forget to ${chalk.blueBright('init $crdtName <tables>')}?'));
       }
 
       // Execute command
       try {
         switch (cmd) {
-          case 'create':
+          case 'init':
             final qualifiedName = args[0];
             final crdtSplit = qualifiedName.split(':');
             final otherSign = crdtSplit.length == 2 ? crdtSplit[0] : null;
@@ -163,7 +163,7 @@ _writeOutCommandInfo() {
     'It is possible to operate on own CRDTs and  shared with others',
   );
   stdout.writeln(
-    '${chalk.blueBright('create <sharedWith?:crdt> <tables>')} => Example: create c1 t1; create @otherSign:c1 t1',
+    '${chalk.blueBright('init <sharedWith?:crdt> <tables>')} => Example: init c1 t1; init @otherSign:c1 t1',
   );
   stdout.writeln(
     '${chalk.blueBright('delete <sharedWith?:crdt>')} => Example: delete c1; delete @otherSign:c1',
