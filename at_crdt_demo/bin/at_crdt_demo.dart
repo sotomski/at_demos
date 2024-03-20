@@ -34,7 +34,7 @@ Future<void> main(List<String> arguments) async {
           crdtName != null &&
           !crdts.containsKey(crdtName)) {
         stdout.writeln(chalk.brightYellow(
-            'No $crdtName CRDT available. Is it a typo or did you forget to ${chalk.blueBright('init $crdtName <tables>')}?'));
+            'No $crdtName CRDT available. Is it a typo or did you forget to ${chalk.blueBright('init $crdtName <comma-separated-tables>')}?'));
       }
 
       // Execute command
@@ -82,12 +82,13 @@ Future<void> main(List<String> arguments) async {
             break;
           case 'list':
             final qualifiedName = args[0];
-            final table = args[1];
-            final map = await crdts[qualifiedName]?.getMap(table) ?? {};
-            stdout.writeln(
-                chalk.brightGreen('Content of $qualifiedName.$table:'));
-            for (final MapEntry(:key, :value) in map.entries) {
-              stdout.writeln('$key: $value');
+            final tables = crdts[qualifiedName]?.tables ?? {};
+            for (var table in tables) {
+              final map = await crdts[qualifiedName]?.getMap(table) ?? {};
+              stdout.writeln(chalk.brightGreen('$table:'));
+              for (final MapEntry(:key, :value) in map.entries) {
+                stdout.writeln('$key: $value');
+              }
             }
             break;
           case 'put':
@@ -163,13 +164,13 @@ _writeOutCommandInfo() {
     'It is possible to operate on own CRDTs and  shared with others',
   );
   stdout.writeln(
-    '${chalk.blueBright('init <sharedWith?:crdt> <tables>')} => Example: init c1 t1; init @otherSign:c1 t1',
+    '${chalk.blueBright('init <sharedWith?:crdt> <tables>')} => Example: init c t; init @otherSign:c1 t1,t2',
   );
   stdout.writeln(
     '${chalk.blueBright('delete <sharedWith?:crdt>')} => Example: delete c1; delete @otherSign:c1',
   );
   stdout.writeln(
-      '${chalk.blueBright('list <sharedWith?:crdt> <table>')} => List the content of a table');
+      '${chalk.blueBright('list <sharedWith?:crdt>')} => List the content of a CRDT');
   stdout.writeln(
       '${chalk.blueBright('put <sharedWith?:crdt> <table> <key> <value>')} => Put a value into a table');
   stdout.writeln(
