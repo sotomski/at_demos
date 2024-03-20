@@ -14,8 +14,8 @@ import 'package:uuid/validation.dart';
 /// - Does it make sense to cache records here or is atClient efficient enough?
 
 /// HIDDEN KNOWLEDGE 🧠
-/// - Karol: I've tried using [MapCrdtBase] as a first approach to implement the CRDT,
-/// but it's sync API clashed with AtClient async API.
+/// - Karol: I've tried using [MapCrdtBase] as to implement the CRDT,
+/// but its sync API clashed with AtClient async API.
 
 // TODO: Consider performance of this solution. [MapCrdtBase] is deemed inefficient by its author.
 /// A state-based grow-only CRDT implementation.
@@ -30,7 +30,7 @@ class AtCrdt extends Crdt {
   /// The [tables] names to use for the keys in the CRDT
   /// Example: 123e4567-e89b-12d3-a456-426655440000.table.crdt.app@atSign
   /// Warning! Beware the max namespace length in atProtocol is 55 - 36 = 19
-  AtCrdt({
+  AtCrdt._({
     required this.atClient,
     this.name = 'crdt',
     required Iterable<String> tables,
@@ -41,7 +41,55 @@ class AtCrdt extends Crdt {
             "Table names must be unique"),
         assert(tables.toList().every((t) => t.length <= 19 - name.length),
             "Table names must be at most ${19 - name.length} characters long"),
+        // assert(
+        //     (sharedBy != null && sharedWith != null) ||
+        //         (sharedBy == null && sharedWith == null),
+        //     "Either both sharedBy and sharedWith must be provided (shared) or none (own)"),
         tables = tables.toSet();
+
+  factory AtCrdt.self({
+    required AtClient atClient,
+    required Iterable<String> tables,
+    String name = 'crdt',
+  }) {
+    return AtCrdt._(
+      atClient: atClient,
+      name: name,
+      tables: tables,
+      sharedWith: null,
+      sharedBy: atClient.getCurrentAtSign(),
+    );
+  }
+
+  factory AtCrdt.sharedWithOther({
+    required AtClient atClient,
+    required Iterable<String> tables,
+    String name = 'crdt',
+    required String otherAtSign,
+  }) {
+    return AtCrdt._(
+      atClient: atClient,
+      name: name,
+      tables: tables,
+      sharedWith: otherAtSign,
+      sharedBy: atClient.getCurrentAtSign(),
+    );
+  }
+
+  factory AtCrdt.sharedByOther({
+    required AtClient atClient,
+    required Iterable<String> tables,
+    String name = 'crdt',
+    required String otherAtSign,
+  }) {
+    return AtCrdt._(
+      atClient: atClient,
+      name: name,
+      tables: tables,
+      sharedWith: atClient.getCurrentAtSign(),
+      sharedBy: otherAtSign,
+    );
+  }
 
   Future<void> init() async {
     late String nodeId;
@@ -298,11 +346,59 @@ class AtCrdt extends Crdt {
         r'\.' +
         RegExp.escape(ns) +
         r'.*';
-    return atClient.getAtKeys(
-      regex: pattern,
-      sharedBy: sharedBy,
-      sharedWith: sharedWith,
-    );
+
+    if ([null, atClient.getCurrentAtSign()].contains(sharedBy) &&
+        sharedWith == null) {
+      // Private/Self
+      final keys = await atClient.getAtKeys(
+        regex: pattern,
+      );
+
+      // print(
+      //   'atClient(${atClient.getCurrentAtSign()})::getAtKeys($table) BEFORE REMOVAL => $keys',
+      // );
+
+      // We only want private keys. Get rid of shared keys.
+      keys.removeWhere((element) =>
+          element.sharedWith != atClient.getCurrentAtSign() &&
+          element.sharedWith != null);
+
+      // print(
+      //   'atClient(${atClient.getCurrentAtSign()})::getAtKeys($table) AFTER REMOVAL => $keys',
+      // );
+
+      return keys;
+    } else if ([null, atClient.getCurrentAtSign()].contains(sharedBy) &&
+        sharedWith != null &&
+        sharedWith != atClient.getCurrentAtSign()) {
+      // Shared with other
+      final keys = await atClient.getAtKeys(
+        regex: pattern,
+        // sharedBy: sharedBy,
+        sharedWith: sharedWith,
+      );
+
+      // print(
+      //   'atClient(sharedBy: $sharedBy, sharedWith: $sharedWith)::getAtKeys($table) => $keys',
+      // );
+
+      return keys;
+    } else if (sharedBy != null && sharedBy != atClient.getCurrentAtSign()) {
+      // Shared by other
+      final keys = await atClient.getAtKeys(
+        regex: pattern,
+        sharedBy: sharedBy,
+        // sharedWith: sharedWith,
+      );
+
+      // print(
+      //   'atClient(sharedBy: $sharedBy, sharedWith: $sharedWith)::getAtKeys($table) => $keys',
+      // );
+
+      return keys;
+    }
+
+    throw 'Unsupported combination of sharedBy ($sharedBy) and sharedWith ($sharedWith)';
   }
 
   Record _recordFromJson(String jsonString) {
@@ -322,11 +418,18 @@ class AtCrdt extends Crdt {
 
   AtKey _atKeyFrom(String table, UuidValue key) {
     final ns = atClient.getPreferences()!.namespace;
-    return AtKey()
-      ..key = "${key.uuid}.$table.$name"
-      ..namespace = ns
-      ..sharedBy = sharedBy
-      ..sharedWith = sharedWith;
+    return sharedWith == null
+        ? AtKey.self(
+            "${key.uuid}.$table.$name",
+            namespace: ns,
+            sharedBy: atClient.getCurrentAtSign()!,
+          ).build()
+        : (AtKey.shared(
+            "${key.uuid}.$table.$name",
+            namespace: ns,
+            sharedBy: sharedBy!,
+          )..sharedWith(sharedWith!))
+            .build();
   }
 
   String _crdtKeyFrom(AtKey atKey) {
