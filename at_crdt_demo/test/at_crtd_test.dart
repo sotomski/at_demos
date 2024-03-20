@@ -2,12 +2,12 @@
 
 import 'dart:async';
 
-import 'package:at_client/at_client.dart';
 import 'package:at_crdt_demo/at_crdt.dart';
 import 'package:crdt/crdt.dart';
-import 'package:mocktail/mocktail.dart';
 import 'package:test/test.dart';
 import 'package:uuid/uuid.dart';
+
+import 'fake_at_client.dart';
 
 Future<void> get _delay => Future.delayed(Duration(milliseconds: 1));
 
@@ -20,7 +20,7 @@ void main() {
   tearDown(() => atClient.data.clear());
 
   Future<AtCrdt> createCrdt(String name, Set<String> tables) async {
-    final aCrdt = AtCrdt(atClient: atClient, name: name, tables: tables);
+    final aCrdt = AtCrdt.self(atClient: atClient, name: name, tables: tables);
     await aCrdt.init();
     return aCrdt;
   }
@@ -367,58 +367,4 @@ void main() {
       await crdt.merge(await crdt1.getChangeset());
     });
   });
-}
-
-class FakeAtClient extends Fake implements AtClient {
-  final Map<AtKey, AtValue> data = {};
-
-  @override
-  Future<List<AtKey>> getAtKeys(
-      {String? regex,
-      String? sharedBy,
-      String? sharedWith,
-      bool showHiddenKeys = false}) {
-    final keys = data.keys
-        .where((k) => regex == null || RegExp(regex).hasMatch(k.toString()))
-        .where((k) => k.sharedWith == sharedWith && k.sharedBy == sharedBy)
-        .toList();
-    print('FakeAtClient::getAtKeys: $regex, $sharedBy, $sharedWith');
-    print('FakeAtClient::getAtKeys result: $keys');
-    return Future.value(keys);
-  }
-
-  @override
-  Future<bool> put(AtKey key, value,
-      {bool isDedicated = false, PutRequestOptions? putRequestOptions}) {
-    data[key] = AtValue()..value = value;
-    print('FakeAtClient::put: $key, $value');
-    return Future.value(true);
-  }
-
-  @override
-  Future<AtValue> get(AtKey key,
-      {bool isDedicated = false, GetRequestOptions? getRequestOptions}) {
-    final value = data[key];
-    if (value == null) {
-      throw 'Key not found: $key in ${data.keys}';
-    }
-    return Future.value(value);
-  }
-
-  @override
-  Future<bool> delete(AtKey key,
-      {bool isDedicated = false, DeleteRequestOptions? deleteRequestOptions}) {
-    data.remove(key);
-    return Future.value(true);
-  }
-
-  @override
-  AtClientPreference? getPreferences() {
-    return AtClientPreference()..namespace = 'testns';
-  }
-
-  @override
-  String? getCurrentAtSign() {
-    return '@alice';
-  }
 }
